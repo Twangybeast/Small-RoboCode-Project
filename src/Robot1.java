@@ -24,6 +24,9 @@ public class Robot1 extends AdvancedRobot
     public static Rectangle2D.Double _fieldRect = new java.awt.geom.Rectangle2D.Double(18, 18, 764, 564);
     public static double WALL_STICK = 160;
 
+    //Info: Enemy heading, bearing, distance, velocity, acceleration
+    public static KDTree<>
+
     @Override
     public void run()
     {
@@ -48,14 +51,26 @@ public class Robot1 extends AdvancedRobot
         double lateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = Math.min(3.0, getEnergy());
+        double bulletPower = Math.min(1.95, e.getEnergy()/4);
+        if (getEnergy() < 50.0 )
+        {
+            bulletPower = 0;
+        }
+
+
+
         double myX = getX();
         double myY = getY();
         double absoluteBearing = getHeadingRadians() + e.getBearingRadians();
 
+
+        //Surfing
         _surfDirections.add(0, new Integer((lateralVelocity >= 0) ? 1 : -1));
         _surfAbsBearings.add(0, new Double(absoluteBearing + Math.PI));
 
+        //Recording positions
+
+        //Gun
         double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
         double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
         double enemyHeading = e.getHeadingRadians();
@@ -71,8 +86,7 @@ public class Robot1 extends AdvancedRobot
         double battleFieldHeight = getBattleFieldHeight();
         double battleFieldWidth = getBattleFieldWidth();
         double predictedX = enemyX, predictedY = enemyY;
-        while ((++deltaTime) * (20.0 - 3.0 * bulletPower) <
-                Point2D.Double.distance(myX, myY, predictedX, predictedY))
+        while ((++deltaTime) * (20.0 - 3.0 * bulletPower) < Point2D.Double.distance(myX, myY, predictedX, predictedY))
         {
             predictedX += Math.sin(enemyHeading) * enemyVelocity;
             predictedY += Math.cos(enemyHeading) * enemyVelocity;
@@ -90,6 +104,8 @@ public class Robot1 extends AdvancedRobot
                 break;
             }
         }
+
+        //Surfing
         double enemyBulletPower = _oppEnergy - e.getEnergy();
         if (enemyBulletPower < 3.01 && bulletPower > 0.09 && _surfDirections.size() > 2)
         {
@@ -114,6 +130,7 @@ public class Robot1 extends AdvancedRobot
         doSurfing();
         double theta = Utils.normalAbsoluteAngle(Math.atan2(predictedX - getX(), predictedY - getY()));
 
+        //Gun
         setTurnRadarRightRadians(Utils.normalRelativeAngle(absoluteBearing - getRadarHeadingRadians()));
         setTurnGunRightRadians(Utils.normalRelativeAngle(theta - getGunHeadingRadians()));
         setFire(bulletPower);
@@ -378,5 +395,12 @@ public class Robot1 extends AdvancedRobot
             }
             robot.setAhead(100);
         }
+    }
+    class DNNNode
+    {
+        double[] data;
+        DNNNode next;
+        long time;
+        int timeToNext;
     }
 }
