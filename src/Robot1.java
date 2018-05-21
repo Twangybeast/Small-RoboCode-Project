@@ -24,12 +24,15 @@ public class Robot1 extends AdvancedRobot
     public static Rectangle2D.Double _fieldRect = new java.awt.geom.Rectangle2D.Double(18, 18, 764, 564);
     public static double WALL_STICK = 160;
 
-    //Info: Enemy heading, bearing, distance, velocity, acceleration
-    public static KDTree<>
+    //Info: Enemy heading, heading change, distance, velocity, acceleration,
+    public static int DIMENSIONS = 5;
+    public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
+    DNNNode lastNode = new DNNNode(new double[DIMENSIONS], null, -1);
 
     @Override
     public void run()
     {
+        ((KDTree.WeightedManhattan)history).setWeights(new double[]{1, 1, 2, 1, 1});
         setAllColors(Color.YELLOW);
         setAdjustRadarForGunTurn(true);
         setAdjustGunForRobotTurn(true);
@@ -51,7 +54,7 @@ public class Robot1 extends AdvancedRobot
         double lateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = Math.min(1.95, e.getEnergy()/4);
+        double bulletPower = Math.max(Math.min(1.95, e.getEnergy()/4), 3.0);
         if (getEnergy() < 50.0 )
         {
             bulletPower = 0;
@@ -62,17 +65,6 @@ public class Robot1 extends AdvancedRobot
         double myX = getX();
         double myY = getY();
         double absoluteBearing = getHeadingRadians() + e.getBearingRadians();
-
-
-        //Surfing
-        _surfDirections.add(0, new Integer((lateralVelocity >= 0) ? 1 : -1));
-        _surfAbsBearings.add(0, new Double(absoluteBearing + Math.PI));
-
-        //Recording positions
-
-        //Gun
-        double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
-        double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
         double enemyHeading = e.getHeadingRadians();
         if (oldEnemyHeading == -1)
         {
@@ -82,25 +74,39 @@ public class Robot1 extends AdvancedRobot
         double enemyVelocity = e.getVelocity();
         oldEnemyHeading = enemyHeading;
 
+
+        //Surfing
+        _surfDirections.add(0, new Integer((lateralVelocity >= 0) ? 1 : -1));
+        _surfAbsBearings.add(0, new Double(absoluteBearing + Math.PI));
+
+        //Recording positions
+        double[] positionInfo = new double[]{
+                Utils.normalAbsoluteAngle(e.getHeading() - absoluteBearing)/(Math.PI*2),
+                Utils.normalAbsoluteAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
+                e.getDistance()/1000,
+                enemyVelocity/8,
+
+
+        };
+
+        //Gun
+        double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
+        double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
+
         double deltaTime = 0;
         double battleFieldHeight = getBattleFieldHeight();
         double battleFieldWidth = getBattleFieldWidth();
-        double predictedX = enemyX, predictedY = enemyY;
+        double predictedX = enemyX;
+        double predictedY = enemyY;
         while ((++deltaTime) * (20.0 - 3.0 * bulletPower) < Point2D.Double.distance(myX, myY, predictedX, predictedY))
         {
             predictedX += Math.sin(enemyHeading) * enemyVelocity;
             predictedY += Math.cos(enemyHeading) * enemyVelocity;
             enemyHeading += enemyHeadingChange;
-            if (predictedX < 18.0
-                    || predictedY < 18.0
-                    || predictedX > battleFieldWidth - 18.0
-                    || predictedY > battleFieldHeight - 18.0)
+            if (predictedX < 18.0 || predictedY < 18.0 || predictedX > battleFieldWidth - 18.0 || predictedY > battleFieldHeight - 18.0)
             {
-
-                predictedX = Math.min(Math.max(18.0, predictedX),
-                        battleFieldWidth - 18.0);
-                predictedY = Math.min(Math.max(18.0, predictedY),
-                        battleFieldHeight - 18.0);
+                predictedX = Math.min(Math.max(18.0, predictedX),  battleFieldWidth - 18.0);
+                predictedY = Math.min(Math.max(18.0, predictedY), battleFieldHeight - 18.0);
                 break;
             }
         }
@@ -398,9 +404,20 @@ public class Robot1 extends AdvancedRobot
     }
     class DNNNode
     {
-        double[] data;
-        DNNNode next;
-        long time;
-        int timeToNext;
+        public double[] data;
+        public DNNNode next;
+        public long time;
+
+        public DNNNode(double[] data, DNNNode next, long time)
+        {
+            this.data = data;
+            this.next = next;
+            this.time = time;
+        }
+        //public int timeToNext;
+    }
+    public static double getBulletSpeed(double power)
+    {
+        return 20 - Math.max(Math.min(power, 3.0), 0.1)* 3;
     }
 }
