@@ -11,6 +11,7 @@ import java.util.ArrayList;
 public class Robot1 extends AdvancedRobot
 {
     double oldEnemyHeading = -1;
+    double oldEnemyVelocity = 0;
     public static int BINS = 47;
     public static double _surfStats[] = new double[BINS];
     public Point2D.Double _myLocation;     // our bot's location
@@ -27,7 +28,9 @@ public class Robot1 extends AdvancedRobot
     //Info: Enemy heading, heading change, distance, velocity, acceleration,
     public static int DIMENSIONS = 5;
     public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
+    public static int MIN_HISTORY_TO_FIRE = 60;
     DNNNode lastNode = new DNNNode(new double[DIMENSIONS], null, -1);
+    GuessFactorGun gun = new GuessFactorGun();
 
     @Override
     public void run()
@@ -73,6 +76,7 @@ public class Robot1 extends AdvancedRobot
         double enemyHeadingChange = enemyHeading - oldEnemyHeading;
         double enemyVelocity = e.getVelocity();
         oldEnemyHeading = enemyHeading;
+        double enemyVelocityChange = enemyVelocity - oldEnemyVelocity;
 
 
         //Surfing
@@ -85,11 +89,23 @@ public class Robot1 extends AdvancedRobot
                 Utils.normalAbsoluteAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
                 e.getDistance()/1000,
                 enemyVelocity/8,
-
-
+                enemyVelocityChange/2
         };
+        /*
+        DNNNode currentNode = new DNNNode(positionInfo, null, getTime());
+        lastNode.next = currentNode;
+        history.addPoint(positionInfo, currentNode);
+        lastNode = currentNode;*/
 
         //Gun
+        if (history.size() > MIN_HISTORY_TO_FIRE)
+        {
+
+        }
+        gun.onScannedRobot(e, getHeadingRadians(), getX(), getY(), getTime(), getGunHeadingRadians(), bulletPower);
+        setTurnGunRightRadians(Utils.normalRelativeAngle(gun.gunAdjust));
+        gun.postFire(setFireBullet(bulletPower)!=null);
+
         double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
         double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
 
@@ -134,12 +150,14 @@ public class Robot1 extends AdvancedRobot
 
         updateWaves();
         doSurfing();
-        double theta = Utils.normalAbsoluteAngle(Math.atan2(predictedX - getX(), predictedY - getY()));
 
         //Gun
+
+        double theta = Utils.normalAbsoluteAngle(Math.atan2(predictedX - getX(), predictedY - getY()));
         setTurnRadarRightRadians(Utils.normalRelativeAngle(absoluteBearing - getRadarHeadingRadians()));
-        setTurnGunRightRadians(Utils.normalRelativeAngle(theta - getGunHeadingRadians()));
-        setFire(bulletPower);
+        /*setTurnGunRightRadians(Utils.normalRelativeAngle(theta - getGunHeadingRadians()));
+        setFire(bulletPower);*/
+
         execute();
     }
 
