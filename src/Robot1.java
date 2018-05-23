@@ -1,12 +1,13 @@
 import robocode.AdvancedRobot;
 import robocode.HitByBulletEvent;
+import robocode.Rules;
 import robocode.ScannedRobotEvent;
 import robocode.util.Utils;
 
 import java.awt.*;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import java.util.ArrayList;
+import java.util.*;
 
 public class Robot1 extends AdvancedRobot
 {
@@ -27,11 +28,16 @@ public class Robot1 extends AdvancedRobot
 
     //Info: Enemy heading, heading change, distance, velocity, acceleration,
     public static int DIMENSIONS = 5;
-    public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
-    public static int MIN_HISTORY_TO_FIRE = 60;
-    DNNNode lastNode = new DNNNode(new double[DIMENSIONS], null, -1);
-    GuessFactorGun gun = new GuessFactorGun();
+    public static KDTree<KDPayload> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
+    public LinkedList<DNNNode> shortHistory = new LinkedList<>();
+    public static int MIN_HISTORY_TO_FIRE = 30;
+    public static final int NEIGHBOR_COUNT = 100;
 
+    GuessFactorGun gun = new GuessFactorGun();
+    //TODO
+    //Insert to KDTREE after wave breaks
+    //Have symmetry w/ +/- velocity
+    //Fix nearest bearing
     @Override
     public void run()
     {
@@ -57,7 +63,8 @@ public class Robot1 extends AdvancedRobot
         double lateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = Math.max(Math.min(1.95, e.getEnergy()/4), 3.0);
+        //double bulletPower = Math.max(Math.min(1.95, e.getEnergy()/4), 3.0);
+        double bulletPower = Math.min(Math.min(1.95, 1.95), 3.0);
         if (getEnergy() < 50.0 )
         {
             bulletPower = 0;
@@ -85,27 +92,87 @@ public class Robot1 extends AdvancedRobot
 
         //Recording positions
         double[] positionInfo = new double[]{
-                Utils.normalAbsoluteAngle(e.getHeading() - absoluteBearing)/(Math.PI*2),
-                Utils.normalAbsoluteAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
+                Utils.normalRelativeAngle(e.getHeadingRadians() - absoluteBearing)/(Math.PI*2),
+                Utils.normalRelativeAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
                 e.getDistance()/1000,
                 enemyVelocity/8,
                 enemyVelocityChange/2
         };
-        /*
-        DNNNode currentNode = new DNNNode(positionInfo, null, getTime());
-        lastNode.next = currentNode;
-        history.addPoint(positionInfo, currentNode);
-        lastNode = currentNode;*/
+        int direction = 1;
+        if (e.getVelocity() != 0)
+        {
+            if (Math.sin(e.getHeadingRadians() - absoluteBearing) * e.getVelocity() < 0)
+                direction = -1;
+            else
+                direction = 1;
+        }
+        DNNNode currentNode = new DNNNode(positionInfo, new WaveBullet(getX(), getY(), absoluteBearing, bulletPower, direction, getTime()));
+        shortHistory.add(currentNode);
+        double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
+        double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
+
+        for (Iterator<DNNNode> iter = shortHistory.iterator();iter.hasNext();)
+        {
+            DNNNode node = iter.next();
+            if (node.waveBullet.checkHit(enemyX, enemyY, getTime()))
+            {
+                iter.remove();
+                history.addPoint(node.data, new KDPayload(node.waveBullet.guessFactor));
+            }
+        }
+
+
 
         //Gun
+        double maxEscapeAngle = currentNode.waveBullet.maxEscapeAngle();
+        double angleStandardDeviation = Math.asin(getWidth()/2/e.getDistance());
+        final double GAUSS_FACTOR = 1.0 / Math.sqrt(2 * Math.PI);
         if (history.size() > MIN_HISTORY_TO_FIRE)
         {
-
+            ArrayList<KDTree.SearchResult<KDPayload>> results = history.nearestNeighbours(positionInfo, Math.min(history.size(), NEIGHBOR_COUNT));
+            Collections.sort(results, (o1, o2) -> //use 1 / (1+x) to weight
+            {
+                double res = o2.distance - o1.distance;
+                if (res == 0)
+                {
+                    return 0;
+                }
+                return res > 0 ? 1 : -1;
+            });
+            //TODO
+            double bestAngle=0;
+            double bestDensity = 0;
+            for (int i = 0; i < results.size(); i++)
+            {
+                KDPayload payloadA = results.get(i).payload;
+                double density = 0;
+                double angleA = getAngleFromGuessFactor(direction, payloadA.guessFactor, maxEscapeAngle);
+                for (KDTree.SearchResult<KDPayload> resultB : results)
+                {
+                    KDPayload payloadB = resultB.payload;
+                    if (payloadA != payloadB)
+                    {
+                        double angleB = getAngleFromGuessFactor(direction, payloadB.guessFactor, maxEscapeAngle);
+                        double dAngle = (angleB - angleA)/angleStandardDeviation;
+                        double strength = GAUSS_FACTOR * Math.exp(-0.5 * (dAngle * dAngle));
+                        density += strength;
+                    }
+                }
+                if (density > bestDensity)
+                {
+                    bestAngle = angleA;
+                    bestDensity = density;
+                }
+            }
+            double gunAdjust = Utils.normalRelativeAngle(absoluteBearing - getGunHeadingRadians()+ bestAngle);
+            setTurnGunRightRadians(gunAdjust);
+            setFireBullet(bulletPower);
         }
-        gun.onScannedRobot(e, getHeadingRadians(), getX(), getY(), getTime(), getGunHeadingRadians(), bulletPower);
-        setTurnGunRightRadians(Utils.normalRelativeAngle(gun.gunAdjust));
-        gun.postFire(setFireBullet(bulletPower)!=null);
-
+        /*
+        gun.onScannedRobot(e, getHeadingRadians(), getX(), getY(), getTime(), bulletPower, getGunHeadingRadians());
+        setTurnGunRightRadians(gun.gunAdjust);
+        gun.postFire(setFireBullet(bulletPower) != null);*/
+        /*
         double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
         double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
 
@@ -125,7 +192,7 @@ public class Robot1 extends AdvancedRobot
                 predictedY = Math.min(Math.max(18.0, predictedY), battleFieldHeight - 18.0);
                 break;
             }
-        }
+        }*/
 
         //Surfing
         double enemyBulletPower = _oppEnergy - e.getEnergy();
@@ -153,14 +220,30 @@ public class Robot1 extends AdvancedRobot
 
         //Gun
 
-        double theta = Utils.normalAbsoluteAngle(Math.atan2(predictedX - getX(), predictedY - getY()));
-        setTurnRadarRightRadians(Utils.normalRelativeAngle(absoluteBearing - getRadarHeadingRadians()));
+        //double theta = Utils.normalAbsoluteAngle(Math.atan2(predictedX - getX(), predictedY - getY()));
+        /*
+        *       Radar
+         */
+        double radarTurn = Utils.normalRelativeAngle(absoluteBearing - getRadarHeadingRadians() );
+        double extraTurn = Math.min( Math.atan( 36.0 / e.getDistance() ), Rules.RADAR_TURN_RATE_RADIANS );
+        if (radarTurn < 0)
+        {
+            radarTurn -= extraTurn;
+        }
+        else
+        {
+            radarTurn += extraTurn;
+        }
+        setTurnRadarRightRadians(Utils.normalRelativeAngle(radarTurn));
         /*setTurnGunRightRadians(Utils.normalRelativeAngle(theta - getGunHeadingRadians()));
         setFire(bulletPower);*/
 
         execute();
     }
-
+    public double getAngleFromGuessFactor(int direction, double gf, double escapeAngle)
+    {
+        return direction * gf * escapeAngle;
+    }
     public void updateWaves()
     {
         for (int x = 0; x < _enemyWaves.size(); x++)
@@ -423,16 +506,22 @@ public class Robot1 extends AdvancedRobot
     class DNNNode
     {
         public double[] data;
-        public DNNNode next;
-        public long time;
+        public WaveBullet waveBullet;
 
-        public DNNNode(double[] data, DNNNode next, long time)
+        public DNNNode(double[] data, WaveBullet waveBullet)
         {
             this.data = data;
-            this.next = next;
-            this.time = time;
+            this.waveBullet = waveBullet;
         }
-        //public int timeToNext;
+    }
+    class KDPayload
+    {
+        public double guessFactor;
+
+        public KDPayload(double guessFactor)
+        {
+            this.guessFactor = guessFactor;
+        }
     }
     public static double getBulletSpeed(double power)
     {
