@@ -24,8 +24,8 @@ public class Robot1 extends AdvancedRobot
     public static Rectangle2D.Double _fieldRect = new java.awt.geom.Rectangle2D.Double(18, 18, 764, 564);
     public static double WALL_STICK = 160;
 
-    //Info: Enemy heading, heading change, distance, velocity, acceleration,
-    public static int DIMENSIONS = 5;
+    //Info: Enemy heading, heading change, distance, velocity, acceleration, lateral velocity
+    public static int DIMENSIONS = 6;
     public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
     public LinkedList<DNNNode> shortHistory = new LinkedList<>();
     public static int MIN_HISTORY_TO_FIRE = 30;
@@ -50,7 +50,7 @@ public class Robot1 extends AdvancedRobot
     @Override
     public void run()
     {
-        ((KDTree.WeightedManhattan)history).setWeights(new double[]{2.5, 0.5, 3, 2.5, 1});
+        ((KDTree.WeightedManhattan)history).setWeights(new double[]{2.5, 0.5, 3, 2.5, 1, 1.5});
         setAllColors(Color.YELLOW);
         setAdjustRadarForGunTurn(true);
         setAdjustGunForRobotTurn(true);
@@ -107,7 +107,8 @@ public class Robot1 extends AdvancedRobot
                 Utils.normalRelativeAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
                 e.getDistance()/1000,
                 enemyVelocity/8,
-                enemyVelocityChange/2
+                enemyVelocityChange/2,
+                lateralVelocity
         };
         int direction = 1;
         if (e.getVelocity() != 0)
@@ -122,7 +123,6 @@ public class Robot1 extends AdvancedRobot
         if (lastNode != null)
         {
             lastNode.next = currentNode;
-
         }
         lastNode = currentNode;
 
