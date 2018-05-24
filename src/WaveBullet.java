@@ -19,6 +19,26 @@ public class WaveBullet
         this.direction = direction;
         fireTime       = time;
     }
+    public void setPower(double power)
+    {
+        this.power = power;
+    }
+
+    public double getStartX()
+    {
+        return startX;
+    }
+
+    public double getStartY()
+    {
+        return startY;
+    }
+
+    public long getFireTime()
+    {
+        return fireTime;
+    }
+
     public double getBulletSpeed()
     {
         return 20 - power * 3;
