@@ -41,7 +41,8 @@ public class Robot1 extends AdvancedRobot
     //DEBUGGING
     public LinkedList<PredictedPosition> enemyPredicted = new LinkedList<>();
     public Point2D.Double aimedPosition = null;
-
+    public AimGhosts aimGhosts = null;
+    public AimGhosts lastGhost = null;
 
     //TODO
     //Insert to KDTREE after wave breaks
@@ -220,7 +221,7 @@ public class Robot1 extends AdvancedRobot
         double myX = getX();
         double myY = getY();
         //Gun
-        double maxEscapeAngle = currentNode.waveBullet.maxEscapeAngle();
+        double maxEscapeAngle = currentNode.waveBullet.maxEscapeAngle(bulletPower);
         double angleStandardDeviation = Math.asin(getWidth() / 2 / enemyDistance);
         ArrayList<KDTree.SearchResult<DNNNode>> results = history.nearestNeighbours(positionInfo, Math.min(history.size(), NEIGHBOR_COUNT));
         Collections.sort(results, (o1, o2) ->
@@ -233,12 +234,14 @@ public class Robot1 extends AdvancedRobot
             return res > 0 ? 1 : -1;
         });
         enemyPredicted = new LinkedList<>();//TODO Remove: Debug
+        ArrayList<AimGhosts> bulletPaths = new ArrayList<>();
         Outer:
         for (int i = 0; i < results.size(); i++)
         {
             DNNNode node = results.get(i).payload;
             WaveBullet waveBullet = node.waveBullet;
             waveBullet.setPower(bulletPower);
+            AimGhosts ghost = new AimGhosts();
             do
             {
                 node = node.next;
@@ -248,8 +251,16 @@ public class Robot1 extends AdvancedRobot
                     i--;
                     continue Outer;
                 }
-            } while (!waveBullet.checkHit(node.enemyPos.x, node.enemyPos.y, node.waveBullet.getFireTime() - 1));
+
+                double angle = Utils.normalAbsoluteAngle(absoluteBearing + getAngleFromGuessFactor(direction, waveBullet.generateGuessFactor(node.enemyPos.x, node.enemyPos.y), maxEscapeAngle));
+                double dist = Point2D.Double.distance(node.waveBullet.getStartX(), node.waveBullet.getStartY(), node.enemyPos.x, node.enemyPos.y);
+                double px = myX + dist * Math.sin(angle);
+                double py = myY + dist * Math.cos(angle);
+                ghost.bulletPos.add(waveBullet.getDistance(node.waveBullet.getFireTime()));
+                ghost.enemyPos.add(new Point2D.Double(px, py));
+            } while (!waveBullet.checkHit(node.enemyPos.x, node.enemyPos.y, node.waveBullet.getFireTime()));
             //TODO Remove: Debug
+            bulletPaths.add(ghost);
 
             double angle = Utils.normalAbsoluteAngle(absoluteBearing + getAngleFromGuessFactor(direction, waveBullet.guessFactor, maxEscapeAngle));
             double dist = Point2D.Double.distance(node.waveBullet.getStartX(), node.waveBullet.getStartY(), node.enemyPos.x, node.enemyPos.y);
@@ -265,6 +276,7 @@ public class Robot1 extends AdvancedRobot
         double bestDensity = 0;
         //TODO Rmove
         int bestIndex = 0;
+        AimGhosts ghost = null;
         for (int i = 0; i < results.size(); i++)
         {
             DNNNode payloadA = results.get(i).payload;
@@ -293,12 +305,20 @@ public class Robot1 extends AdvancedRobot
                 bestAngle = angleA;
                 bestDensity = density;
                 bestIndex = i;
+
+                ghost = bulletPaths.get(i);
+                ghost.myLocation = new Point2D.Double(_myLocation.x, _myLocation.y);
+                ghost.bulletBearing = angle;
             }
         }
         System.out.printf("Velocity: %.2f\t\n", results.get(bestIndex).payload.data[3] * 8);
         double gunAdjust = Utils.normalRelativeAngle(absoluteBearing - getGunHeadingRadians() + bestAngle);
         setTurnGunRightRadians(gunAdjust);
-        setFireBullet(bulletPower);
+        if(setFireBullet(bulletPower)!=null)
+        {
+            aimGhosts = lastGhost;
+        }
+        lastGhost = ghost;
         return bestDensity;
     }
 
@@ -322,6 +342,20 @@ public class Robot1 extends AdvancedRobot
             g.setColor(Color.GREEN);
             int radius = 3;
             g.fillOval((int)Math.round(aimedPosition.x)-radius, (int)Math.round(aimedPosition.y)-radius, radius*2, radius*2);
+        }
+        if (aimGhosts != null)
+        {
+            Point2D.Double myLocation = aimGhosts.myLocation;
+            for (int i = 0; i < aimGhosts.enemyPos.size(); i+= 2)
+            {
+                g.setColor(new Color(0 , 1, 0f, 0.5f+0.5f*(i/aimGhosts.enemyPos.size())));
+                Point2D.Double enemyPos = aimGhosts.enemyPos.get(i);
+                g.drawRect((int)Math.round(enemyPos.x) - 18, (int)Math.round(enemyPos.y) - 18, 36, 36);
+                double dist =aimGhosts.bulletPos.get(i);
+                g.drawOval((int)Math.round(myLocation.x-dist), (int)Math.round(myLocation.y-dist), 2*(int)dist, 2*(int)dist);
+            }
+            g.setColor(new Color(0,1.0f, 1));
+            g.drawLine((int)myLocation.x, (int)myLocation.y, (int)Math.round(Math.sin(aimGhosts.bulletBearing)*1000 + myLocation.x), (int)Math.round(Math.cos(aimGhosts.bulletBearing)*1000 + myLocation.y));
         }
     }
     public boolean lowEnergy()
@@ -633,20 +667,24 @@ public class Robot1 extends AdvancedRobot
             this.next = next;
         }
     }
-    class KDPayload
-    {
-        public double guessFactor;
-
-        public KDPayload(double guessFactor)
-        {
-            this.guessFactor = guessFactor;
-        }
-    }
     public static double getBulletSpeed(double power)
     {
         return 20 - Math.max(Math.min(power, 3.0), 0.1)* 3;
     }
+    class AimGhosts
+    {
+        public ArrayList<Double> bulletPos;
+        public ArrayList<Point2D.Double> enemyPos;
+        public double bulletBearing = 0.0;
+        public Point2D.Double myLocation = null;
+        public AimGhosts()
+        {
+            this.bulletPos = new ArrayList<>();
+            this.enemyPos = new ArrayList<>();
+        }
+    }
 }
+
 class PredictedPosition
 {
     double x;

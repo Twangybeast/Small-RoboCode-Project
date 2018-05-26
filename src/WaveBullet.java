@@ -39,24 +39,34 @@ public class WaveBullet
         return fireTime;
     }
 
-    public double getBulletSpeed()
+    public static double getBulletSpeed(double bulletPower)
     {
-        return 20 - power * 3;
+        return 20 - bulletPower* 3;
     }
 
-    public double maxEscapeAngle()
+    public static double maxEscapeAngle(double bulletPower)
     {
-        return Math.asin(8 / getBulletSpeed());
+        return Math.asin(8 / getBulletSpeed(bulletPower));
+    }
+    public double getDistance(long currentTime)
+    {
+        return (currentTime - fireTime) * getBulletSpeed(power);
+    }
+    public double generateGuessFactor(double enemyX, double enemyY)
+    {
+        double desiredDirection = Math.atan2(enemyX - startX, enemyY - startY);
+        double angleOffset = Utils.normalRelativeAngle(desiredDirection - startBearing);
+        return Math.max(-1, Math.min(1, angleOffset / maxEscapeAngle(power))) * direction;
     }
     public boolean checkHit(double enemyX, double enemyY, long currentTime)
     {
         // if the distance from the wave origin to our enemy has passed
         // the distance the bullet would have traveled...
-        if (Point2D.distance(startX, startY, enemyX, enemyY) <= (currentTime - fireTime) * getBulletSpeed())
+        if (Point2D.distance(startX, startY, enemyX, enemyY) <= getDistance(currentTime))
         {
             double desiredDirection = Math.atan2(enemyX - startX, enemyY - startY);
             double angleOffset = Utils.normalRelativeAngle(desiredDirection - startBearing);
-            guessFactor = Math.max(-1, Math.min(1, angleOffset / maxEscapeAngle())) * direction;
+            guessFactor = Math.max(-1, Math.min(1, angleOffset / maxEscapeAngle(power))) * direction;
             return true;
         }
         return false;
