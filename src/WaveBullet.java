@@ -64,9 +64,7 @@ public class WaveBullet
         // the distance the bullet would have traveled...
         if (Point2D.distance(startX, startY, enemyX, enemyY) <= getDistance(currentTime))
         {
-            double desiredDirection = Math.atan2(enemyX - startX, enemyY - startY);
-            double angleOffset = Utils.normalRelativeAngle(desiredDirection - startBearing);
-            guessFactor = Math.max(-1, Math.min(1, angleOffset / maxEscapeAngle(power))) * direction;
+            guessFactor = generateGuessFactor(enemyX, enemyY);
             return true;
         }
         return false;

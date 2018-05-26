@@ -11,7 +11,10 @@ public class Robot1 extends AdvancedRobot
     double oldEnemyHeading = -1;
     double oldEnemyVelocity = 0;
     public static int BINS = 47;
-    public static double _surfStats[] = new double[BINS];
+    public static double _surfStats[] = new double[]{
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            0,
+            1,1,1,1,1,1,1,3,3,3,3,3,3,3,3,3,3,3,1,1,1,1,1  };
     public Point2D.Double _myLocation;     // our bot's location
     public Point2D.Double _enemyLocation;  // enemy bot's location
 
@@ -73,13 +76,13 @@ public class Robot1 extends AdvancedRobot
         double lateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = Math.max(Math.min(1.95, e.getEnergy()/4), 3.0);
+        double bulletPower = Math.min(2.0, e.getEnergy()/4);
         //double bulletPower = Math.min(Math.min(1.95, 1.95), 3.0);
-        if (lowEnergy() && e.getDistance() > 150)
+        if (lowEnergy() && e.getDistance() > 250)
         {
-            bulletPower = 0.5;
+            //bulletPower = 1;
         }
-
+        //bulletPower = 2;
 
 
         double myX = getX();
@@ -119,7 +122,7 @@ public class Robot1 extends AdvancedRobot
             else
                 direction = 1;
         }
-        DNNNode currentNode = new DNNNode(positionInfo, new WaveBullet(getX(), getY(), absoluteBearing, 0, direction, getTime()), new Point2D.Double(enemyX, enemyY), null);
+        DNNNode currentNode = new DNNNode(positionInfo, new WaveBullet(getX(), getY(), absoluteBearing, 0, direction, getTime()), new Point2D.Double(enemyX, enemyY), enemyHeading,null);
         shortHistory.offer(currentNode);
         if (lastNode != null)
         {
@@ -136,12 +139,12 @@ public class Robot1 extends AdvancedRobot
 
         if (history.size() > MIN_HISTORY_TO_FIRE)
         {
-            double density = aimGun(currentNode, positionInfo, bulletPower, absoluteBearing, direction, e.getDistance());
+            double density = aimGun(currentNode, positionInfo, bulletPower, absoluteBearing, direction, e.getDistance(), enemyHeading, new Point2D.Double(enemyX, enemyY));
             System.out.println(density);
             if (density < MIN_DENSITY)
             {
                 bulletPower = 0.5;
-                aimGun(currentNode, positionInfo, bulletPower, absoluteBearing, direction, e.getDistance());
+                //aimGun(currentNode, positionInfo, bulletPower, absoluteBearing, direction, e.getDistance(), enemyHeading, new Point2D.Double(enemyX, enemyY));
             }
         }
         /*
@@ -216,7 +219,7 @@ public class Robot1 extends AdvancedRobot
 
         execute();
     }
-    public double aimGun(DNNNode currentNode, double[] positionInfo, double bulletPower, double absoluteBearing, int direction, double enemyDistance)
+    public double aimGun(DNNNode currentNode, double[] positionInfo, double bulletPower, double absoluteBearing, int direction, double enemyDistance, double enemyHeading, Point2D.Double enemyPosition)
     {
         double myX = getX();
         double myY = getY();
@@ -235,13 +238,16 @@ public class Robot1 extends AdvancedRobot
         });
         enemyPredicted = new LinkedList<>();//TODO Remove: Debug
         ArrayList<AimGhosts> bulletPaths = new ArrayList<>();
+        ArrayList<Double> guessFactors = new ArrayList<>();
         Outer:
         for (int i = 0; i < results.size(); i++)
         {
             DNNNode node = results.get(i).payload;
-            WaveBullet waveBullet = node.waveBullet;
-            waveBullet.setPower(bulletPower);
+            DNNNode startNode = node;
+            WaveBullet waveBullet = new WaveBullet(myX, myY, absoluteBearing, bulletPower, direction, node.waveBullet.getFireTime());
             AimGhosts ghost = new AimGhosts();
+            double predictedX = 0;
+            double predictedY = 0;
             do
             {
                 node = node.next;
@@ -252,13 +258,24 @@ public class Robot1 extends AdvancedRobot
                     continue Outer;
                 }
 
-                double angle = Utils.normalAbsoluteAngle(absoluteBearing + getAngleFromGuessFactor(direction, waveBullet.generateGuessFactor(node.enemyPos.x, node.enemyPos.y), maxEscapeAngle));
-                double dist = Point2D.Double.distance(node.waveBullet.getStartX(), node.waveBullet.getStartY(), node.enemyPos.x, node.enemyPos.y);
-                double px = myX + dist * Math.sin(angle);
-                double py = myY + dist * Math.cos(angle);
+                double distanceTraveled = startNode.enemyPos.distance(node.enemyPos);
+                double dx = node.enemyPos.x - startNode.enemyPos.x;
+                double dy = node.enemyPos.y-startNode.enemyPos.y;
+                double travelAngle = Utils.normalRelativeAngle(Math.atan2(dx, dy) - startNode.enemyHeading);
+                //Final virtual travel angle for past history relative to robot heading
+
+                //Now projecting to current position
+                travelAngle += enemyHeading;
+                predictedX = enemyPosition.x + Math.sin(travelAngle) * distanceTraveled;
+                predictedY = enemyPosition.y + Math.cos(travelAngle) * distanceTraveled;
+
+                //TODO: Debug
                 ghost.bulletPos.add(waveBullet.getDistance(node.waveBullet.getFireTime()));
-                ghost.enemyPos.add(new Point2D.Double(px, py));
-            } while (!waveBullet.checkHit(node.enemyPos.x, node.enemyPos.y, node.waveBullet.getFireTime()));
+                ghost.enemyPos.add(new Point2D.Double(predictedX, predictedY));
+
+            } while (!waveBullet.checkHit(predictedX, predictedY, node.waveBullet.getFireTime()));
+            guessFactors.add(waveBullet.guessFactor);
+
             //TODO Remove: Debug
             bulletPaths.add(ghost);
 
@@ -281,13 +298,13 @@ public class Robot1 extends AdvancedRobot
         {
             DNNNode payloadA = results.get(i).payload;
             double density = 0;
-            double angleA = getAngleFromGuessFactor(direction, payloadA.waveBullet.guessFactor, maxEscapeAngle);
+            double angleA = getAngleFromGuessFactor(direction, guessFactors.get(i), maxEscapeAngle);
             for (int j = 0; j < results.size(); j++)
             {
                 DNNNode payloadB = results.get(j).payload;
                 if (payloadA != payloadB)
                 {
-                    double angleB = getAngleFromGuessFactor(direction, payloadB.waveBullet.guessFactor, maxEscapeAngle);
+                    double angleB = getAngleFromGuessFactor(direction, guessFactors.get(j), maxEscapeAngle);
                     double dAngle = (angleB - angleA) / angleStandardDeviation;
                     double strength = GAUSS_FACTOR * Math.exp(-0.5 * (dAngle * dAngle));
                     density += strength * getGaussian(results.get(j).distance, KD_DISTANCE_SD);
@@ -348,7 +365,7 @@ public class Robot1 extends AdvancedRobot
             Point2D.Double myLocation = aimGhosts.myLocation;
             for (int i = 0; i < aimGhosts.enemyPos.size(); i+= 2)
             {
-                g.setColor(new Color(0 , 1, 0f, 0.5f+0.5f*(i/aimGhosts.enemyPos.size())));
+                g.setColor(new Color(0 , 1, 0f, 0.5f+0.5f*(i*1.0f/aimGhosts.enemyPos.size())));
                 Point2D.Double enemyPos = aimGhosts.enemyPos.get(i);
                 g.drawRect((int)Math.round(enemyPos.x) - 18, (int)Math.round(enemyPos.y) - 18, 36, 36);
                 double dist =aimGhosts.bulletPos.get(i);
@@ -657,13 +674,15 @@ public class Robot1 extends AdvancedRobot
         public double[] data;
         public WaveBullet waveBullet;
         public Point2D.Double enemyPos;
+        public double enemyHeading;
         public DNNNode next;
 
-        public DNNNode(double[] data, WaveBullet waveBullet, Point2D.Double enemyPos, DNNNode next)
+        public DNNNode(double[] data, WaveBullet waveBullet, Point2D.Double enemyPos, double enemyHeading, DNNNode next)
         {
             this.data = data;
             this.waveBullet = waveBullet;
             this.enemyPos = enemyPos;
+            this.enemyHeading = enemyHeading;
             this.next = next;
         }
     }
