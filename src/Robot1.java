@@ -27,8 +27,8 @@ public class Robot1 extends AdvancedRobot
     public static Rectangle2D.Double _fieldRect = new java.awt.geom.Rectangle2D.Double(18, 18, 764, 564);
     public static double WALL_STICK = 160;
 
-    //Info: Enemy heading, heading change, distance, velocity, acceleration, lateral velocity
-    public static int DIMENSIONS = 6;
+    //Info: Enemy heading, heading change, distance, velocity, acceleration, lateral velocity, advancing velocity
+    public static int DIMENSIONS = 7;
     public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
     public LinkedList<DNNNode> shortHistory = new LinkedList<>();
     public static int MIN_HISTORY_TO_FIRE = 30;
@@ -54,7 +54,7 @@ public class Robot1 extends AdvancedRobot
     @Override
     public void run()
     {
-        ((KDTree.WeightedManhattan)history).setWeights(new double[]{2.5, 0.5, 3, 2.5, 1, 1.5});
+        ((KDTree.WeightedManhattan)history).setWeights(new double[]{2, 1.2, 5, 3, 10, 10, 2});
         setAllColors(Color.YELLOW);
         setAdjustRadarForGunTurn(true);
         setAdjustGunForRobotTurn(true);
@@ -73,7 +73,7 @@ public class Robot1 extends AdvancedRobot
     public void onScannedRobot(ScannedRobotEvent e)
     {
         _myLocation = new Point2D.Double(getX(), getY());
-        double lateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
+        double myLateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
         double bulletPower = Math.min(2.0, e.getEnergy()/4);
@@ -87,20 +87,22 @@ public class Robot1 extends AdvancedRobot
 
         double myX = getX();
         double myY = getY();
+        double enemyVelocity = e.getVelocity();
         double absoluteBearing = getHeadingRadians() + e.getBearingRadians();
         double enemyHeading = e.getHeadingRadians();
+        double lateralVelocity = enemyVelocity * Math.sin(enemyHeading - absoluteBearing);
+        double advancingVelocity = -Math.cos(enemyHeading - (absoluteBearing)) * enemyVelocity;
         if (oldEnemyHeading == -1)
         {
             oldEnemyHeading = enemyHeading;
         }
         double enemyHeadingChange = enemyHeading - oldEnemyHeading;
-        double enemyVelocity = e.getVelocity();
         oldEnemyHeading = enemyHeading;
         double enemyVelocityChange = enemyVelocity - oldEnemyVelocity;
 
 
         //Surfing
-        _surfDirections.add(0, new Integer((lateralVelocity >= 0) ? 1 : -1));
+        _surfDirections.add(0, new Integer((myLateralVelocity >= 0) ? 1 : -1));
         _surfAbsBearings.add(0, new Double(absoluteBearing + Math.PI));
 
         //Recording positions
@@ -109,10 +111,11 @@ public class Robot1 extends AdvancedRobot
         double[] positionInfo = new double[]{
                 Utils.normalRelativeAngle(e.getHeadingRadians() - absoluteBearing)/(Math.PI*2),
                 Utils.normalRelativeAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
-                e.getDistance()/1000,
+                limit(0,e.getDistance()/900.0, 1),
                 enemyVelocity/8,
                 enemyVelocityChange/2,
-                lateralVelocity
+                lateralVelocity/8,
+                limit(0, advancingVelocity/16 + 0.5 , 1)
         };
         int direction = 1;
         if (e.getVelocity() != 0)
