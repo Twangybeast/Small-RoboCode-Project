@@ -21,14 +21,21 @@ public class Robot1 extends AdvancedRobot
     public ArrayList _enemyWaves;
     public ArrayList _surfDirections;
     public ArrayList _surfAbsBearings;
+    public LinkedList<Point2D.Double> enemyLocations;
+    public int timeSinceDirectionChange = 0;
+    public int timeSinceDeceleration = 0;
+    public int lastDirection = 1;
+
     public static final double LESS_THAN_HALF_PI = 1.25;
+
+    public static final double DEFAULT_BULLET_POWER = 2.0;
 
     public static double  _oppEnergy = 100.0;
     public static Rectangle2D.Double _fieldRect = new java.awt.geom.Rectangle2D.Double(18, 18, 764, 564);
     public static double WALL_STICK = 160;
 
-    //Info: Enemy heading, heading change, distance, velocity, acceleration, lateral velocity, advancing velocity
-    public static int DIMENSIONS = 7;
+    //Info: heading change, distance, velocity, acceleration, lateral velocity, advancing velocity, dist-10-ago, time-since-dir-change, time-since-decel
+    public static int DIMENSIONS = 9;
     public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
     public LinkedList<DNNNode> shortHistory = new LinkedList<>();
     public static int MIN_HISTORY_TO_FIRE = 30;
@@ -54,13 +61,14 @@ public class Robot1 extends AdvancedRobot
     @Override
     public void run()
     {
-        ((KDTree.WeightedManhattan)history).setWeights(new double[]{2, 1.2, 5, 3, 10, 10, 2});
+        ((KDTree.WeightedManhattan)history).setWeights(new double[]{1, 5, 3, 10, 10, 2, 3, 3, 3});
         setAllColors(Color.YELLOW);
         setAdjustRadarForGunTurn(true);
         setAdjustGunForRobotTurn(true);
         _enemyWaves = new ArrayList();
         _surfDirections = new ArrayList();
         _surfAbsBearings = new ArrayList();
+        enemyLocations = new LinkedList<>();
         do{
             if(getRadarTurnRemainingRadians() == 0){
                 setTurnRadarRight(Double.POSITIVE_INFINITY);
@@ -76,7 +84,7 @@ public class Robot1 extends AdvancedRobot
         double myLateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = Math.min(2.0, e.getEnergy()/4);
+        double bulletPower = Math.min(DEFAULT_BULLET_POWER, e.getEnergy()/4);
         //double bulletPower = Math.min(Math.min(1.95, 1.95), 3.0);
         if (lowEnergy() && e.getDistance() > 250)
         {
@@ -99,6 +107,32 @@ public class Robot1 extends AdvancedRobot
         double enemyHeadingChange = enemyHeading - oldEnemyHeading;
         oldEnemyHeading = enemyHeading;
         double enemyVelocityChange = enemyVelocity - oldEnemyVelocity;
+        if (Math.abs(enemyVelocity) < Math.abs(oldEnemyVelocity))
+        {
+            timeSinceDeceleration = 0;
+        }
+        else
+        {
+            timeSinceDeceleration++;
+        }
+        oldEnemyVelocity = enemyVelocity;
+        int direction = 1;
+        if (e.getVelocity() != 0)
+        {
+            if (Math.sin(e.getHeadingRadians() - absoluteBearing) * e.getVelocity() < 0)
+                direction = -1;
+            else
+                direction = 1;
+        }
+        if (direction == lastDirection)
+        {
+            timeSinceDirectionChange++;
+        }
+        else
+        {
+            timeSinceDirectionChange = 0;
+        }
+        lastDirection = direction;
 
 
         //Surfing
@@ -108,23 +142,21 @@ public class Robot1 extends AdvancedRobot
         //Recording positions
         double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
         double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
+        Point2D.Double enemyLocation =new Point2D.Double(enemyX, enemyY);
+        enemyLocations.add(0, enemyLocation);
+        double distLast10 = enemyLocation.distance(enemyLocations.get(Math.min(10, enemyLocations.size()-1)));//Distance traveled by enemy in last 10 ticks
+        double BFT = e.getDistance()/bulletVelocity(DEFAULT_BULLET_POWER);
         double[] positionInfo = new double[]{
-                Utils.normalRelativeAngle(e.getHeadingRadians() - absoluteBearing)/(Math.PI*2),
                 Utils.normalRelativeAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
                 limit(0,e.getDistance()/900.0, 1),
                 enemyVelocity/8,
                 enemyVelocityChange/2,
                 lateralVelocity/8,
-                limit(0, advancingVelocity/16 + 0.5 , 1)
+                limit(0, advancingVelocity/16 + 0.5 , 1),
+                limit(0, distLast10/(80), 1),
+                1/(1 + 2.0 * timeSinceDirectionChange/BFT),
+                1/(1 + 2.0*timeSinceDeceleration/BFT)
         };
-        int direction = 1;
-        if (e.getVelocity() != 0)
-        {
-            if (Math.sin(e.getHeadingRadians() - absoluteBearing) * e.getVelocity() < 0)
-                direction = -1;
-            else
-                direction = 1;
-        }
         DNNNode currentNode = new DNNNode(positionInfo, new WaveBullet(getX(), getY(), absoluteBearing, 0, direction, getTime()), new Point2D.Double(enemyX, enemyY), enemyHeading,null);
         shortHistory.offer(currentNode);
         if (lastNode != null)
@@ -150,31 +182,6 @@ public class Robot1 extends AdvancedRobot
                 //aimGun(currentNode, positionInfo, bulletPower, absoluteBearing, direction, e.getDistance(), enemyHeading, new Point2D.Double(enemyX, enemyY));
             }
         }
-        /*
-        gun.onScannedRobot(e, getHeadingRadians(), getX(), getY(), getTime(), bulletPower, getGunHeadingRadians());
-        setTurnGunRightRadians(gun.gunAdjust);
-        gun.postFire(setFireBullet(bulletPower) != null);*/
-        /*
-        double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
-        double enemyY = getY() + e.getDistance() * Math.cos(absoluteBearing);
-
-        double deltaTime = 0;
-        double battleFieldHeight = getBattleFieldHeight();
-        double battleFieldWidth = getBattleFieldWidth();
-        double predictedX = enemyX;
-        double predictedY = enemyY;
-        while ((++deltaTime) * (20.0 - 3.0 * bulletPower) < Point2D.Double.distance(myX, myY, predictedX, predictedY))
-        {
-            predictedX += Math.sin(enemyHeading) * enemyVelocity;
-            predictedY += Math.cos(enemyHeading) * enemyVelocity;
-            enemyHeading += enemyHeadingChange;
-            if (predictedX < 18.0 || predictedY < 18.0 || predictedX > battleFieldWidth - 18.0 || predictedY > battleFieldHeight - 18.0)
-            {
-                predictedX = Math.min(Math.max(18.0, predictedX),  battleFieldWidth - 18.0);
-                predictedY = Math.min(Math.max(18.0, predictedY), battleFieldHeight - 18.0);
-                break;
-            }
-        }*/
 
         //Surfing
         double enemyBulletPower = _oppEnergy - e.getEnergy();
@@ -200,9 +207,6 @@ public class Robot1 extends AdvancedRobot
         updateWaves();
         doSurfing();
 
-        //Gun
-
-        //double theta = Utils.normalAbsoluteAngle(Math.atan2(predictedX - getX(), predictedY - getY()));
         /*
         *       Radar
          */
@@ -217,8 +221,6 @@ public class Robot1 extends AdvancedRobot
             radarTurn += extraTurn;
         }
         setTurnRadarRightRadians(Utils.normalRelativeAngle(radarTurn));
-        /*setTurnGunRightRadians(Utils.normalRelativeAngle(theta - getGunHeadingRadians()));
-        setFire(bulletPower);*/
 
         execute();
     }
@@ -514,7 +516,7 @@ public class Robot1 extends AdvancedRobot
             }
         }
     }
-    public Point2D.Double predictPosition(EnemyWave surfWave, int direction)
+    public Point2D.Double predictPosition(EnemyWave surfWave, int direction, boolean stop)
     {
         Point2D.Double predictedPosition = (Point2D.Double) _myLocation.clone();
         double predictedVelocity = getVelocity();
@@ -545,8 +547,14 @@ public class Robot1 extends AdvancedRobot
             // this one is nice ;). if predictedVelocity and moveDir have
             // different signs you want to breack down
             // otherwise you want to accelerate (look at the factor "2")
-            predictedVelocity +=
-                    (predictedVelocity * moveDir < 0 ? 2 * moveDir : moveDir);
+            if (stop)
+            {
+                predictedVelocity += (predictedVelocity > 0 ? -2 : 2);
+            }
+            else
+            {
+                predictedVelocity += (predictedVelocity * moveDir < 0 ? 2 * moveDir : moveDir);
+            }
             predictedVelocity = limit(-8, predictedVelocity, 8);
 
             // calculate the new predicted position
@@ -568,9 +576,16 @@ public class Robot1 extends AdvancedRobot
 
     public double checkDanger(EnemyWave surfWave, int direction)
     {
-        int index = getFactorIndex(surfWave,
-                predictPosition(surfWave, direction));
-
+        int index;
+        if (direction == 0)
+        {
+            index = getFactorIndex(surfWave, predictPosition(surfWave, 1, true));
+        }
+        else
+        {
+            index = getFactorIndex(surfWave,
+                    predictPosition(surfWave, direction, false));
+        }
         return _surfStats[index];
     }
 
