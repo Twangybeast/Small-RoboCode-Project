@@ -12,13 +12,12 @@ public class Robot1 extends AdvancedRobot
     double oldEnemyVelocity = 0;
     public static int BINS = 47;
     public static double _surfStats[] = new double[]{
-            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-            0,
-            1,1,1,1,1,1,1,3,3,3,3,3,3,3,3,3,3,3,1,1,1,1,1  };
+            0.02, 0.02, 0.02, 0.02, 0.02, 0.03, 0.03, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06, 0.07, 0.09, 0.11, 0.14, 0.19, 0.28, 0.47, 0.92, 1.95, 2.60, 1.57, 1.24, 1.41, 2.18, 1.83, 2.13, 1.27, 0.92, 1.03, 1.33, 2.14, 2.47, 3.77, 2.83, 2.98, 1.74, 1.21, 1.44, 2.50, 4.56, 2.34, 1.00, 0.54
+    };
     public Point2D.Double _myLocation;     // our bot's location
     public Point2D.Double _enemyLocation;  // enemy bot's location
 
-    public ArrayList _enemyWaves;
+    public ArrayList<EnemyWave> _enemyWaves;
     public ArrayList _surfDirections;
     public ArrayList _surfAbsBearings;
     public LinkedList<Point2D.Double> enemyLocations;
@@ -53,6 +52,7 @@ public class Robot1 extends AdvancedRobot
     public Point2D.Double aimedPosition = null;
     public AimGhosts aimGhosts = null;
     public AimGhosts lastGhost = null;
+    public LinkedList<Point2D.Double> predictedPositionAtIntercept;
 
     //TODO
     //Insert to KDTREE after wave breaks
@@ -69,6 +69,7 @@ public class Robot1 extends AdvancedRobot
         _surfDirections = new ArrayList();
         _surfAbsBearings = new ArrayList();
         enemyLocations = new LinkedList<>();
+        predictedPositionAtIntercept = new LinkedList<>();
         do{
             if(getRadarTurnRemainingRadians() == 0){
                 setTurnRadarRight(Double.POSITIVE_INFINITY);
@@ -175,7 +176,7 @@ public class Robot1 extends AdvancedRobot
         if (history.size() > MIN_HISTORY_TO_FIRE)
         {
             double density = aimGun(currentNode, positionInfo, bulletPower, absoluteBearing, direction, e.getDistance(), enemyHeading, new Point2D.Double(enemyX, enemyY));
-            System.out.println(density);
+            //System.out.println(density);
             if (density < MIN_DENSITY)
             {
                 bulletPower = 0.5;
@@ -185,7 +186,7 @@ public class Robot1 extends AdvancedRobot
 
         //Surfing
         double enemyBulletPower = _oppEnergy - e.getEnergy();
-        if (enemyBulletPower < 3.01 && bulletPower > 0.09 && _surfDirections.size() > 2)
+        if (enemyBulletPower < 3.01 && enemyBulletPower > 0.09 && _surfDirections.size() > 2)
         {
             EnemyWave ew = new EnemyWave();
             ew.fireTime = getTime() - 1;
@@ -206,7 +207,12 @@ public class Robot1 extends AdvancedRobot
 
         updateWaves();
         doSurfing();
-
+        System.out.print("Wave Surfing Stats: ");
+        for (double d : _surfStats)
+        {
+            System.out.printf("%.2f ", d);
+        }
+        System.out.println();
         /*
         *       Radar
          */
@@ -284,11 +290,17 @@ public class Robot1 extends AdvancedRobot
             //TODO Remove: Debug
             bulletPaths.add(ghost);
 
-            double angle = Utils.normalAbsoluteAngle(absoluteBearing + getAngleFromGuessFactor(direction, waveBullet.guessFactor, maxEscapeAngle));
-            double dist = Point2D.Double.distance(node.waveBullet.getStartX(), node.waveBullet.getStartY(), node.enemyPos.x, node.enemyPos.y);
-            double px = myX + dist * Math.sin(angle);
-            double py = myY + dist * Math.cos(angle);
-            enemyPredicted.add(new PredictedPosition(px, py, getGaussian(results.get(i).distance, KD_DISTANCE_SD)));
+            double distanceTraveled = startNode.enemyPos.distance(node.enemyPos);
+            double dx = node.enemyPos.x - startNode.enemyPos.x;
+            double dy = node.enemyPos.y-startNode.enemyPos.y;
+            double travelAngle = Utils.normalRelativeAngle(Math.atan2(dx, dy) - startNode.enemyHeading);
+            //Final virtual travel angle for past history relative to robot heading
+
+            //Now projecting to current position
+            travelAngle += enemyHeading;
+            predictedX = enemyPosition.x + Math.sin(travelAngle) * distanceTraveled;
+            predictedY = enemyPosition.y + Math.cos(travelAngle) * distanceTraveled;
+            enemyPredicted.add(new PredictedPosition(predictedX, predictedY, getGaussian(results.get(i).distance, KD_DISTANCE_SD)));
         }
 
             /*if (!results.isEmpty())
@@ -333,7 +345,6 @@ public class Robot1 extends AdvancedRobot
                 ghost.bulletBearing = angle;
             }
         }
-        System.out.printf("Velocity: %.2f\t\n", results.get(bestIndex).payload.data[3] * 8);
         double gunAdjust = Utils.normalRelativeAngle(absoluteBearing - getGunHeadingRadians() + bestAngle);
         setTurnGunRightRadians(gunAdjust);
         if(setFireBullet(bulletPower)!=null)
@@ -354,10 +365,11 @@ public class Robot1 extends AdvancedRobot
     public void onPaint(Graphics2D g)
     {
         g.setColor(Color.RED);
-        for (PredictedPosition pos : enemyPredicted)
+        for (int i=0;i<enemyPredicted.size() && i < 10;i++)
         {
-            g.setColor(new Color(1f,0, 0, (float)pos.strength));
-            g.fillRect((int)Math.round(pos.x)-1, (int)Math.round(pos.y)-1, 2, 2);
+            PredictedPosition pos = enemyPredicted.get(i);
+            g.setColor(new Color(1f,0, 0, 0.5f+0.5f*(i*1.0f/enemyPredicted.size())));
+            g.drawRect((int)Math.round(pos.x) - 18, (int)Math.round(pos.y) - 18, 36, 36);
         }
         if (aimedPosition != null)
         {
@@ -378,6 +390,29 @@ public class Robot1 extends AdvancedRobot
             }
             g.setColor(new Color(0,1.0f, 1));
             g.drawLine((int)myLocation.x, (int)myLocation.y, (int)Math.round(Math.sin(aimGhosts.bulletBearing)*1000 + myLocation.x), (int)Math.round(Math.cos(aimGhosts.bulletBearing)*1000 + myLocation.y));
+        }
+        double max = 0;
+        for (double d : _surfStats)
+        {
+            max = Math.max(d, max);
+        }
+        for (EnemyWave ew : _enemyWaves)
+        {
+            for (int i = 0; i < BINS; i++)
+            {
+                double offset = getAngleFromIndex(ew, i);
+                double strength = _surfStats[i]/max;
+                g.setColor(new Color((float)limit(0, strength,1), 0, (float)limit(0,(1-strength), 1)));
+                double angle = ew.directAngle+offset;
+                Point2D.Double point = project(ew.fireLocation, angle, ew.distanceTraveled);
+                final double size = 3;
+                g.fillOval(((int) (point.x - size)), ((int) (point.y + size)), (int)(size*2),(int)(size*2));
+            }
+        }
+        for (Point2D.Double pos : predictedPositionAtIntercept)
+        {
+            g.setColor(Color.WHITE);
+            g.drawRect(((int) (pos.x - 18)), ((int) (pos.y - 18)), 36, 36);
         }
     }
     public boolean lowEnergy()
@@ -427,14 +462,17 @@ public class Robot1 extends AdvancedRobot
 
     public static int getFactorIndex(EnemyWave ew, Point2D.Double targetLocation)
     {
-        double offsetAngle = (absoluteBearing(ew.fireLocation, targetLocation)
-                - ew.directAngle);
-        double factor = Utils.normalRelativeAngle(offsetAngle)
-                / maxEscapeAngle(ew.bulletVelocity) * ew.direction;
+        double offsetAngle = (absoluteBearing(ew.fireLocation, targetLocation) - ew.directAngle);
+        double factor = Utils.normalRelativeAngle(offsetAngle) / maxEscapeAngle(ew.bulletVelocity) * ew.direction;
 
-        return (int) limit(0,
-                (factor * ((BINS - 1) / 2)) + ((BINS - 1) / 2),
-                BINS - 1);
+        return (int) limit(0, (factor * ((BINS - 1) / 2)) + ((BINS - 1) / 2), BINS - 1);
+    }
+
+    public static double getAngleFromIndex(EnemyWave ew, int index)
+    {
+        double factor = (index - (BINS-1)/2.0)/((BINS-1)/2);
+        double angle =  factor * ew.direction * maxEscapeAngle(ew.bulletVelocity);
+        return angle;
     }
 
     public void logHit(EnemyWave ew, Point2D.Double targetLocation)
@@ -449,10 +487,16 @@ public class Robot1 extends AdvancedRobot
             _surfStats[x] += 1.0 / (Math.pow(index - x, 2) + 1);
         }
     }
+    @Override
+    public void onBulletHit(BulletHitEvent e)
+    {
+        _oppEnergy -= Rules.getBulletDamage(e.getBullet().getPower());
+    }
 
     @Override
     public void onHitByBullet(HitByBulletEvent e)
     {
+        _oppEnergy += e.getBullet().getPower() * 3;
         // If the _enemyWaves collection is empty, we must have missed the
         // detection of this wave somehow.
         if (!_enemyWaves.isEmpty())
@@ -549,7 +593,14 @@ public class Robot1 extends AdvancedRobot
             // otherwise you want to accelerate (look at the factor "2")
             if (stop)
             {
-                predictedVelocity += (predictedVelocity > 0 ? -2 : 2);
+                if (Math.abs(predictedVelocity) <= 2)
+                {
+                    predictedVelocity = 0;
+                }
+                else
+                {
+                    predictedVelocity += (predictedVelocity > 0 ? -2 : 2);
+                }
             }
             else
             {
@@ -558,15 +609,13 @@ public class Robot1 extends AdvancedRobot
             predictedVelocity = limit(-8, predictedVelocity, 8);
 
             // calculate the new predicted position
-            predictedPosition = project(predictedPosition, predictedHeading,
-                    predictedVelocity);
+            predictedPosition = project(predictedPosition, predictedHeading, predictedVelocity);
 
             counter++;
 
-            if (predictedPosition.distance(surfWave.fireLocation) <
-                    surfWave.distanceTraveled + (counter * surfWave.bulletVelocity)
-                            + surfWave.bulletVelocity)
+            if (predictedPosition.distance(surfWave.fireLocation) < surfWave.distanceTraveled + (counter * surfWave.bulletVelocity) + surfWave.bulletVelocity)
             {
+                predictedPositionAtIntercept.add(new Point2D.Double(predictedPosition.x, predictedPosition.y));
                 intercepted = true;
             }
         } while (!intercepted && counter < 500);
@@ -583,8 +632,7 @@ public class Robot1 extends AdvancedRobot
         }
         else
         {
-            index = getFactorIndex(surfWave,
-                    predictPosition(surfWave, direction, false));
+            index = getFactorIndex(surfWave, predictPosition(surfWave, direction, false));
         }
         return _surfStats[index];
     }
@@ -597,20 +645,30 @@ public class Robot1 extends AdvancedRobot
         {
             return;
         }
-
+        predictedPositionAtIntercept = new LinkedList<>();
         double dangerLeft = checkDanger(surfWave, -1);
         double dangerRight = checkDanger(surfWave, 1);
+        double dangerNone = checkDanger(surfWave, 0);
 
         double goAngle = absoluteBearing(surfWave.fireLocation, _myLocation);
-        if (dangerLeft < dangerRight)
-        {
-            goAngle = wallSmoothing(_myLocation, goAngle - (LESS_THAN_HALF_PI), -1);
-        } else
+
+        boolean stop = dangerNone < dangerLeft && dangerNone < dangerRight;
+        if (stop)
         {
             goAngle = wallSmoothing(_myLocation, goAngle + (LESS_THAN_HALF_PI), 1);
         }
+        else
+        {
+            if (dangerLeft < dangerRight)
+            {
+                goAngle = wallSmoothing(_myLocation, goAngle - (LESS_THAN_HALF_PI), -1);
+            } else
+            {
+                goAngle = wallSmoothing(_myLocation, goAngle + (LESS_THAN_HALF_PI), 1);
+            }
+        }
 
-        setBackAsFront(this, goAngle);
+        setBackAsFront(this, goAngle, stop);
     }
 
     class EnemyWave
@@ -661,8 +719,9 @@ public class Robot1 extends AdvancedRobot
         return Math.asin(8.0 / velocity);
     }
 
-    public static void setBackAsFront(AdvancedRobot robot, double goAngle)
+    public static void setBackAsFront(AdvancedRobot robot, double goAngle, boolean stop)
     {
+
         double angle =
                 Utils.normalRelativeAngle(goAngle - robot.getHeadingRadians());
         if (Math.abs(angle) > (Math.PI / 2))
@@ -674,7 +733,7 @@ public class Robot1 extends AdvancedRobot
             {
                 robot.setTurnLeftRadians(Math.PI - angle);
             }
-            robot.setBack(100);
+            robot.setBack(stop ? 0 : 100);
         } else
         {
             if (angle < 0)
@@ -684,7 +743,7 @@ public class Robot1 extends AdvancedRobot
             {
                 robot.setTurnRightRadians(angle);
             }
-            robot.setAhead(100);
+            robot.setAhead(stop ? 0 : 100);
         }
     }
     class DNNNode
