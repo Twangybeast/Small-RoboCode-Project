@@ -210,13 +210,8 @@ public class Robot1 extends AdvancedRobot
         _enemyLocation = project(_myLocation, absoluteBearing, e.getDistance());
 
         updateWaves();
-        doSurfing();
-        System.out.print("Wave Surfing Stats: ");
-        for (double d : _surfStats)
-        {
-            System.out.printf("%.2f ", d);
-        }
-        System.out.println();
+        doSurfing(_enemyLocation);
+
         /*
         *       Radar
          */
@@ -244,7 +239,7 @@ public class Robot1 extends AdvancedRobot
         ArrayList<KDTree.SearchResult<DNNNode>> results = history.nearestNeighbours(positionInfo, Math.min(history.size(), NEIGHBOR_COUNT));
         Collections.sort(results, (o1, o2) ->
         {
-            double res = o2.distance - o1.distance;
+            double res = o1.distance - o2.distance;
             if (res == 0)
             {
                 return 0;
@@ -315,9 +310,11 @@ public class Robot1 extends AdvancedRobot
         //TODO Rmove
         int bestIndex = 0;
         AimGhosts ghost = null;
+        System.out.println("----------------");
         for (int i = 0; i < results.size(); i++)
         {
             DNNNode payloadA = results.get(i).payload;
+            System.out.println(results.get(i).distance);
             double density = 0;
             double angleA = getAngleFromGuessFactor(direction, guessFactors.get(i), maxEscapeAngle);
             for (int j = 0; j < results.size(); j++)
@@ -369,10 +366,10 @@ public class Robot1 extends AdvancedRobot
     public void onPaint(Graphics2D g)
     {
         g.setColor(Color.RED);
-        for (int i=0;i<enemyPredicted.size() && i < 10;i++)
+        for (int i=0;i<enemyPredicted.size() && i < 50;i++)
         {
             PredictedPosition pos = enemyPredicted.get(i);
-            g.setColor(new Color(1f,0, 0, 0.5f+0.5f*(i*1.0f/enemyPredicted.size())));
+            g.setColor(new Color(1f,0, 0, (float) pos.strength));
             g.drawRect((int)Math.round(pos.x) - 18, (int)Math.round(pos.y) - 18, 36, 36);
         }
         if (aimedPosition != null)
@@ -388,9 +385,9 @@ public class Robot1 extends AdvancedRobot
             {
                 g.setColor(new Color(0 , 1, 0f, 0.5f+0.5f*(i*1.0f/aimGhosts.enemyPos.size())));
                 Point2D.Double enemyPos = aimGhosts.enemyPos.get(i);
-                g.drawRect((int)Math.round(enemyPos.x) - 18, (int)Math.round(enemyPos.y) - 18, 36, 36);
+                //g.drawRect((int)Math.round(enemyPos.x) - 18, (int)Math.round(enemyPos.y) - 18, 36, 36);
                 double dist =aimGhosts.bulletPos.get(i);
-                g.drawOval((int)Math.round(myLocation.x-dist), (int)Math.round(myLocation.y-dist), 2*(int)dist, 2*(int)dist);
+                //g.drawOval((int)Math.round(myLocation.x-dist), (int)Math.round(myLocation.y-dist), 2*(int)dist, 2*(int)dist);
             }
             g.setColor(new Color(0,1.0f, 1));
             g.drawLine((int)myLocation.x, (int)myLocation.y, (int)Math.round(Math.sin(aimGhosts.bulletBearing)*1000 + myLocation.x), (int)Math.round(Math.cos(aimGhosts.bulletBearing)*1000 + myLocation.y));
@@ -641,12 +638,13 @@ public class Robot1 extends AdvancedRobot
         return _surfStats[index];
     }
 
-    public void doSurfing()
+    public void doSurfing(Point2D.Double enemyLocation)
     {
         EnemyWave surfWave = getClosestSurfableWave();
 
         if (surfWave == null)
         {
+            setBackAsFront(this, wallSmoothing(_myLocation, absoluteBearing(enemyLocation, _myLocation)+LESS_THAN_HALF_PI, 1), false);
             return;
         }
         predictedPositionAtIntercept = new LinkedList<>();
