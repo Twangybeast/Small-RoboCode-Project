@@ -45,6 +45,10 @@ public class Robot1 extends AdvancedRobot
     public static final double KD_DISTANCE_SD = 3.0;
     public static final double MIN_DENSITY = 6;
 
+
+    //New Wave Surfing
+    //velocity, acceleration
+
     GuessFactorGun gun = new GuessFactorGun();
 
     //DEBUGGING
