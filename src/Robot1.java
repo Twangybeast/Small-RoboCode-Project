@@ -33,9 +33,11 @@ public class Robot1 extends AdvancedRobot
     public static Rectangle2D.Double _fieldRect = new java.awt.geom.Rectangle2D.Double(18, 18, 764, 564);
     public static double WALL_STICK = 160;
 
-    //Info: heading change, distance, velocity, acceleration, lateral velocity, advancing velocity, dist-10-ago, time-since-dir-change, time-since-decel
-    public static int DIMENSIONS = 9;
+    //Info: heading change, distance, velocity, acceleration, lateral velocity, advancing velocity, dist-10-ago, time-since-dir-change, time-since-decel, data decay
+    public static int DIMENSIONS = 10;
     public static KDTree<DNNNode> history = new KDTree.WeightedManhattan<>(DIMENSIONS);
+    public static long timesScanned = 0;
+    public static double DECAY_FACTOR = 3500;
     public LinkedList<DNNNode> shortHistory = new LinkedList<>();
     public static int MIN_HISTORY_TO_FIRE = 30;
     public static int MIN_HISTORY_TO_ADD = 100;
@@ -44,6 +46,14 @@ public class Robot1 extends AdvancedRobot
     final static double GAUSS_FACTOR = 1.0 / Math.sqrt(2 * Math.PI);
     public static final double KD_DISTANCE_SD = 3.0;
     public static final double MIN_DENSITY = 6;
+
+    public static boolean BULLET_HIT = false;
+    //Bullet missing test
+    public static final int MAX_HIT_HISTORY_SIZE = 5;
+    public static LinkedList<ShootingHistory> hitHistory = new LinkedList<>();
+
+    //Anti-miirror
+    public static double mirrorValue = 0;
 
 
     //New Wave Surfing
@@ -65,7 +75,7 @@ public class Robot1 extends AdvancedRobot
     @Override
     public void run()
     {
-        ((KDTree.WeightedManhattan)history).setWeights(new double[]{1, 5, 3, 10, 10, 2, 3, 3, 3});
+        ((KDTree.WeightedManhattan)history).setWeights(new double[]{1, 5, 3, 10, 10, 2, 3, 3, 3, 4});
         setAllColors(Color.YELLOW);
         setAdjustRadarForGunTurn(true);
         setAdjustGunForRobotTurn(true);
@@ -89,11 +99,17 @@ public class Robot1 extends AdvancedRobot
         double myLateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = Math.min(DEFAULT_BULLET_POWER, e.getEnergy()/4);
+        double bulletPower = DEFAULT_BULLET_POWER * limit(0, getTotalHistory().getHitRate()/(2/3), 1);
+        bulletPower = Math.min(bulletPower, e.getEnergy()/4);
+        bulletPower = Math.max(0.1, bulletPower);
         //double bulletPower = Math.min(Math.min(1.95, 1.95), 3.0);
         if (lowEnergy() && e.getDistance() > 250)
         {
             //bulletPower = 1;
+        }
+        if (!BULLET_HIT)
+        {
+            bulletPower = Rules.MIN_BULLET_POWER;
         }
         //bulletPower = 2;
 
@@ -151,6 +167,8 @@ public class Robot1 extends AdvancedRobot
         enemyLocations.add(0, enemyLocation);
         double distLast10 = enemyLocation.distance(enemyLocations.get(Math.min(10, enemyLocations.size()-1)));//Distance traveled by enemy in last 10 ticks
         double BFT = e.getDistance()/bulletVelocity(DEFAULT_BULLET_POWER);
+        double dataDecay = 1.0/(1+timesScanned/DECAY_FACTOR);
+        timesScanned++;
         double[] positionInfo = new double[]{
                 Utils.normalRelativeAngle(enemyHeadingChange)/(Math.PI * 2 / 36),
                 limit(0,e.getDistance()/900.0, 1),
@@ -160,7 +178,8 @@ public class Robot1 extends AdvancedRobot
                 limit(0, advancingVelocity/16 + 0.5 , 1),
                 limit(0, distLast10/(80), 1),
                 1/(1 + 2.0 * timeSinceDirectionChange/BFT),
-                1/(1 + 2.0*timeSinceDeceleration/BFT)
+                1/(1 + 2.0*timeSinceDeceleration/BFT),
+                dataDecay
         };
         DNNNode currentNode = new DNNNode(positionInfo, new WaveBullet(getX(), getY(), absoluteBearing, 0, direction, getTime()), new Point2D.Double(enemyX, enemyY), enemyHeading,null);
         shortHistory.offer(currentNode);
@@ -233,6 +252,8 @@ public class Robot1 extends AdvancedRobot
     {
         double myX = getX();
         double myY = getY();
+        //Anti mirror
+        Point2D.Double mirroredPosition;
         //Gun
         double maxEscapeAngle = currentNode.waveBullet.maxEscapeAngle(bulletPower);
         double angleStandardDeviation = Math.asin(getWidth() / 2 / enemyDistance);
@@ -491,9 +512,44 @@ public class Robot1 extends AdvancedRobot
     @Override
     public void onBulletHit(BulletHitEvent e)
     {
+        BULLET_HIT = true;
         _oppEnergy -= Rules.getBulletDamage(e.getBullet().getPower());
+        logBulletHitMiss().addHit();
     }
-
+    @Override
+    public void onBulletMissed(BulletMissedEvent e)
+    {
+        logBulletHitMiss().addMiss();
+    }
+    public ShootingHistory logBulletHitMiss()
+    {
+        ShootingHistory hist = hitHistory.getLast();
+        if (hist.total == ShootingHistory.HISTORY_SIZE)
+        {
+            hist = new ShootingHistory(0,0);
+            hitHistory.addLast(hist);
+            if(hitHistory.size() > MAX_HIT_HISTORY_SIZE)
+            {
+                hitHistory.removeFirst();
+            }
+            return hist;
+        }
+        else
+        {
+            return hist;
+        }
+    }
+    public ShootingHistory getTotalHistory()
+    {
+        int hit = 0;
+        int total = 0;
+        for (ShootingHistory hist : hitHistory)
+        {
+            hit += hist.numHit;
+            total += hist.total;
+        }
+        return new ShootingHistory(hit, total);
+    }
     @Override
     public void onHitByBullet(HitByBulletEvent e)
     {
@@ -794,5 +850,30 @@ class PredictedPosition
         this.x = x;
         this.y = y;
         this.strength = strength;
+    }
+}
+class ShootingHistory
+{
+    public static final int HISTORY_SIZE = 4;
+    public int numHit;
+    public int total;
+
+    public ShootingHistory(int numHit, int total)
+    {
+        this.numHit = numHit;
+        this.total = total;
+    }
+    public void addHit()
+    {
+        numHit++;
+        total++;
+    }
+    public void addMiss()
+    {
+        total++;
+    }
+    public double getHitRate()
+    {
+        return numHit * 1.0 / total;
     }
 }
