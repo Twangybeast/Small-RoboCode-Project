@@ -18,6 +18,8 @@ public class Robot1 extends AdvancedRobot
     public Point2D.Double _enemyLocation;  // enemy bot's location
 
     public ArrayList<EnemyWave> _enemyWaves;
+    public LinkedList<RobotStatus> myStatuses;
+    double myLastHeading=0;
     public ArrayList _surfDirections;
     public ArrayList _surfAbsBearings;
     public LinkedList<Point2D.Double> enemyLocations;
@@ -83,6 +85,8 @@ public class Robot1 extends AdvancedRobot
         _surfDirections = new ArrayList();
         _surfAbsBearings = new ArrayList();
         enemyLocations = new LinkedList<>();
+        myStatuses = new LinkedList<>();
+        myLastHeading = getHeadingRadians();
         predictedPositionAtIntercept = new LinkedList<>();
         do{
             if(getRadarTurnRemainingRadians() == 0){
@@ -99,7 +103,12 @@ public class Robot1 extends AdvancedRobot
         double myLateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
-        double bulletPower = DEFAULT_BULLET_POWER * limit(0, getTotalHistory().getHitRate()/(2/3), 1);
+        double bulletPower = DEFAULT_BULLET_POWER* limit(0, getTotalHistory().getHitRate()/(0.1), 1);
+        System.out.println(bulletPower);
+        if (Double.isNaN(bulletPower))
+        {
+            bulletPower = Rules.MIN_BULLET_POWER;
+        }
         bulletPower = Math.min(bulletPower, e.getEnergy()/4);
         bulletPower = Math.max(0.1, bulletPower);
         //double bulletPower = Math.min(Math.min(1.95, 1.95), 3.0);
@@ -331,11 +340,9 @@ public class Robot1 extends AdvancedRobot
         //TODO Rmove
         int bestIndex = 0;
         AimGhosts ghost = null;
-        System.out.println("----------------");
         for (int i = 0; i < results.size(); i++)
         {
             DNNNode payloadA = results.get(i).payload;
-            System.out.println(results.get(i).distance);
             double density = 0;
             double angleA = getAngleFromGuessFactor(direction, guessFactors.get(i), maxEscapeAngle);
             for (int j = 0; j < results.size(); j++)
@@ -523,7 +530,17 @@ public class Robot1 extends AdvancedRobot
     }
     public ShootingHistory logBulletHitMiss()
     {
-        ShootingHistory hist = hitHistory.getLast();
+        ShootingHistory hist;
+        if (hitHistory.isEmpty())
+        {
+            hist = new ShootingHistory(0,0);
+            hitHistory.add(hist);
+            return hist;
+        }
+        else
+        {
+            hist = hitHistory.getLast();
+        }
         if (hist.total == ShootingHistory.HISTORY_SIZE)
         {
             hist = new ShootingHistory(0,0);
@@ -547,6 +564,10 @@ public class Robot1 extends AdvancedRobot
         {
             hit += hist.numHit;
             total += hist.total;
+        }
+        if (total == 0)
+        {
+            total = 1;
         }
         return new ShootingHistory(hit, total);
     }
@@ -691,6 +712,8 @@ public class Robot1 extends AdvancedRobot
         {
             index = getFactorIndex(surfWave, predictPosition(surfWave, direction, false));
         }
+        double angle = getAngleFromIndex(surfWave, index);
+
         return _surfStats[index];
     }
 
@@ -876,4 +899,8 @@ class ShootingHistory
     {
         return numHit * 1.0 / total;
     }
+}
+class RobotStatus
+{
+
 }
