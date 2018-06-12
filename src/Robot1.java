@@ -1,4 +1,5 @@
 import robocode.*;
+import robocode.Robot;
 import robocode.util.Utils;
 
 import java.awt.*;
@@ -18,10 +19,17 @@ public class Robot1 extends AdvancedRobot
     public Point2D.Double _enemyLocation;  // enemy bot's location
 
     public ArrayList<EnemyWave> _enemyWaves;
+    //My surfing
+    public static final int SURFING_DIMENSIONS = 4;
+            //Lateral velocity, advancing velocity, time since decel
+    public static KDTree<DNNNode> surfingHistory = new KDTree.WeightedManhattan<>(SURFING_DIMENSIONS);
     public LinkedList<RobotStatus> myStatuses;
+    public int myTimeSinceDecel = 0;
+
+
+
+
     double myLastHeading=0;
-    public ArrayList _surfDirections;
-    public ArrayList _surfAbsBearings;
     public LinkedList<Point2D.Double> enemyLocations;
     public int timeSinceDirectionChange = 0;
     public int timeSinceDeceleration = 0;
@@ -78,12 +86,11 @@ public class Robot1 extends AdvancedRobot
     public void run()
     {
         ((KDTree.WeightedManhattan)history).setWeights(new double[]{1, 5, 3, 10, 10, 2, 3, 3, 3, 4});
+        ((KDTree.WeightedManhattan)surfingHistory).setWeights(new double[]{10, 2, 3});
         setAllColors(Color.YELLOW);
         setAdjustRadarForGunTurn(true);
         setAdjustGunForRobotTurn(true);
         _enemyWaves = new ArrayList();
-        _surfDirections = new ArrayList();
-        _surfAbsBearings = new ArrayList();
         enemyLocations = new LinkedList<>();
         myStatuses = new LinkedList<>();
         myLastHeading = getHeadingRadians();
@@ -100,7 +107,6 @@ public class Robot1 extends AdvancedRobot
     public void onScannedRobot(ScannedRobotEvent e)
     {
         _myLocation = new Point2D.Double(getX(), getY());
-        double myLateralVelocity = getVelocity() * Math.sin(e.getBearingRadians());
 
 
         double bulletPower = DEFAULT_BULLET_POWER* limit(0, getTotalHistory().getHitRate()/(0.1), 1);
@@ -166,8 +172,17 @@ public class Robot1 extends AdvancedRobot
 
 
         //Surfing
-        _surfDirections.add(0, new Integer((myLateralVelocity >= 0) ? 1 : -1));
-        _surfAbsBearings.add(0, new Double(absoluteBearing + Math.PI));
+        double myVelocity = getVelocity();
+        double myLateralVelocity = myVelocity * Math.sin(e.getBearingRadians());
+        double myAdvancingVelocity = -myVelocity * Math.cos(e.getBearingRadians());
+        timeSinceDeceleration++;
+        if (!myStatuses.isEmpty() && myVelocity < myStatuses.get(0).velocity)
+        {
+            timeSinceDeceleration = 0;
+        }
+
+        myStatuses.add(0, new RobotStatus(_myLocation, Utils.normalRelativeAngle(absoluteBearing+Math.PI), timeSinceDeceleration, myVelocity, myLateralVelocity, myAdvancingVelocity, myLateralVelocity >= 0 ? 1 : -1));
+
 
         //Recording positions
         double enemyX = getX() + e.getDistance() * Math.sin(absoluteBearing);
@@ -218,15 +233,16 @@ public class Robot1 extends AdvancedRobot
 
         //Surfing
         double enemyBulletPower = _oppEnergy - e.getEnergy();
-        if (enemyBulletPower < 3.01 && enemyBulletPower > 0.09 && _surfDirections.size() > 2)
+        if (enemyBulletPower < 3.01 && enemyBulletPower > 0.09 && myStatuses.size() > 2)
         {
             EnemyWave ew = new EnemyWave();
             ew.fireTime = getTime() - 1;
             ew.bulletVelocity = bulletVelocity(enemyBulletPower);
             ew.distanceTraveled = bulletVelocity(enemyBulletPower);
-            ew.direction = ((Integer) _surfDirections.get(2)).intValue();
-            ew.directAngle = ((Double) _surfAbsBearings.get(2)).doubleValue();
+            ew.direction = myStatuses.get(2).direction;
+            ew.directAngle = myStatuses.get(2).directAngle;
             ew.fireLocation = (Point2D.Double) _enemyLocation.clone(); // last tick
+            ew.status = myStatuses.get(2);
 
             _enemyWaves.add(ew);
         }
@@ -507,7 +523,9 @@ public class Robot1 extends AdvancedRobot
     public void logHit(EnemyWave ew, Point2D.Double targetLocation)
     {
         int index = getFactorIndex(ew, targetLocation);
-
+        //TODO Change this and change checkDanger
+        RobotStatus status = ew.status;
+        //surfingHistory.addPoint(new double[]{})
         for (int x = 0; x < BINS; x++)
         {
             // for the spot bin that we were hit on, add 1;
@@ -575,45 +593,17 @@ public class Robot1 extends AdvancedRobot
     public void onHitByBullet(HitByBulletEvent e)
     {
         _oppEnergy += e.getBullet().getPower() * 3;
-        // If the _enemyWaves collection is empty, we must have missed the
-        // detection of this wave somehow.
-        if (!_enemyWaves.isEmpty())
-        {
-            Point2D.Double hitBulletLocation = new Point2D.Double(
-                    e.getBullet().getX(), e.getBullet().getY());
-            EnemyWave hitWave = null;
-
-            // look through the EnemyWaves, and find one that could've hit us.
-            for (int x = 0; x < _enemyWaves.size(); x++)
-            {
-                EnemyWave ew = (EnemyWave) _enemyWaves.get(x);
-
-                if (Math.abs(ew.distanceTraveled -
-                        _myLocation.distance(ew.fireLocation)) < 50
-                        && Math.abs(bulletVelocity(e.getBullet().getPower())
-                        - ew.bulletVelocity) < 0.001)
-                {
-                    hitWave = ew;
-                    break;
-                }
-            }
-
-            if (hitWave != null)
-            {
-                logHit(hitWave, hitBulletLocation);
-
-                // We can remove this wave now, of course.
-                _enemyWaves.remove(_enemyWaves.lastIndexOf(hitWave));
-            }
-        }
+        onBulletDataPoint(new Point2D.Double(e.getBullet().getX(), e.getBullet().getY()), e.getBullet().getPower());
     }
     @Override
     public void onBulletHitBullet(BulletHitBulletEvent e)
     {
+        onBulletDataPoint(new Point2D.Double(e.getBullet().getX(), e.getBullet().getY()), e.getBullet().getPower());
+    }
+    public void onBulletDataPoint(Point2D.Double hitLocation, double power)
+    {
         if (!_enemyWaves.isEmpty())
         {
-            Point2D.Double hitBulletLocation = new Point2D.Double(
-                    e.getBullet().getX(), e.getBullet().getY());
             EnemyWave hitWave = null;
 
             // look through the EnemyWaves, and find one that could've hit us.
@@ -621,8 +611,7 @@ public class Robot1 extends AdvancedRobot
             {
                 EnemyWave ew = (EnemyWave) _enemyWaves.get(x);
 
-                if (Math.abs(ew.distanceTraveled - hitBulletLocation.distance(ew.fireLocation)) < 50 && Math.abs(bulletVelocity(e.getBullet().getPower())
-                        - ew.bulletVelocity) < 0.001)
+                if (Math.abs(ew.distanceTraveled - hitLocation.distance(ew.fireLocation)) < 50 && Math.abs(bulletVelocity(power) - ew.bulletVelocity) < 0.001)
                 {
                     hitWave = ew;
                     break;
@@ -631,7 +620,7 @@ public class Robot1 extends AdvancedRobot
 
             if (hitWave != null)
             {
-                logHit(hitWave, hitBulletLocation);
+                logHit(hitWave, hitLocation);
 
                 // We can remove this wave now, of course.
                 _enemyWaves.remove(_enemyWaves.lastIndexOf(hitWave));
@@ -758,6 +747,7 @@ public class Robot1 extends AdvancedRobot
         long fireTime;
         double bulletVelocity, directAngle, distanceTraveled;
         int direction;
+        public RobotStatus status;
 
         public EnemyWave()
         {
@@ -844,6 +834,11 @@ public class Robot1 extends AdvancedRobot
             this.next = next;
         }
     }
+    class WaveNode
+    {
+        public WaveBullet wave;
+        public double relativeAimedAngle;
+    }
     public static double getBulletSpeed(double power)
     {
         return 20 - Math.max(Math.min(power, 3.0), 0.1)* 3;
@@ -902,5 +897,22 @@ class ShootingHistory
 }
 class RobotStatus
 {
+    public Point2D.Double location;
+    public double directAngle;
+    public int timeSinceDecel;
+    public double velocity;
+    public double lateralVelocity;
+    public double advancingVelocity;
+    public int direction;
 
+    public RobotStatus(Point2D.Double location, double directAngle, int timeSinceDecel, double velocity, double lateralVelocity, double advancingVelocity, int direction)
+    {
+        this.location = location;
+        this.directAngle = directAngle;
+        this.timeSinceDecel = timeSinceDecel;
+        this.velocity = velocity;
+        this.lateralVelocity = lateralVelocity;
+        this.advancingVelocity = advancingVelocity;
+        this.direction = direction;
+    }
 }
