@@ -7,13 +7,13 @@ import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.*;
 
-public class Robot1 extends AdvancedRobot
+public class GG_EZ extends AdvancedRobot
 {
     double oldEnemyHeading = -1;
     double oldEnemyVelocity = 0;
     public static int BINS = 47;
     public static double _surfStats[] = new double[BINS];
-    public static final double[] DEFAULT_SURF_STATS = new double[]{
+    public static double[] DEFAULT_SURF_STATS = new double[]{
             0.02, 0.02, 0.02, 0.02, 0.02, 0.03, 0.03, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06, 0.07, 0.09, 0.11, 0.14, 0.19, 0.28, 0.47, 0.92, 1.95, 2.60, 1.57, 1.24, 1.41, 2.18, 1.83, 2.13, 1.27, 0.92, 1.03, 1.33, 2.14, 2.47, 3.77, 2.83, 2.98, 1.74, 1.21, 1.44, 2.50, 4.56, 2.34, 1.00, 0.54
     };
     public Point2D.Double _myLocation;     // our bot's location
@@ -72,12 +72,6 @@ public class Robot1 extends AdvancedRobot
 
     //Anti-miirror
     public static double mirrorValue = 0;
-
-
-    //New Wave Surfing
-    //velocity, acceleration
-
-    GuessFactorGun gun = new GuessFactorGun();
 
     //DEBUGGING
     public LinkedList<PredictedPosition> enemyPredicted = new LinkedList<>();
@@ -447,7 +441,7 @@ public class Robot1 extends AdvancedRobot
         {
             if (ew.surfStats == null)
             {
-                ew.surfStats = regenerateBins(ew.status, ew.power);
+                ew.surfStats = regenerateBins(ew.status, ew.fireLocation.distance(_myLocation), ew.power);
             }
             double max = 0;
             for (double d : ew.surfStats)
@@ -489,7 +483,7 @@ public class Robot1 extends AdvancedRobot
     {
         return direction * gf * escapeAngle;
     }
-    public double[] regenerateBins(RobotStatus status, double power)
+    public double[] regenerateBins(RobotStatus status, double distance, double power)
     {
         double[] stats = new double[BINS];
         ArrayList<KDTree.SearchResult<WaveNode>> neighbors = surfingHistory.nearestNeighbours(getSurfingDataPoint(status, power), Math.min(SURFING_NEIGHBORS, surfingHistory.size()));
@@ -502,7 +496,7 @@ public class Robot1 extends AdvancedRobot
             return stats;
         }
 
-        double botWidthAngle = Math.abs(36.0/status.distance);
+        double botWidthAngle = Math.abs(36.0/distance);
 
         double minDistance = 100;
         for (KDTree.SearchResult<WaveNode> neighbor : neighbors)
@@ -613,7 +607,12 @@ public class Robot1 extends AdvancedRobot
         int index = getFactorIndex(ew, targetLocation);
         double offsetAngle = (absoluteBearing(ew.fireLocation, targetLocation) - ew.directAngle);
         double guessFactor = getFactor(offsetAngle, ew.bulletVelocity, ew.direction);
-
+        for (int x = 0; x < BINS; x++) {
+            // for the spot bin that we were hit on, add 1;
+            // for the bins next to it, add 1 / 2;
+            // the next one, add 1 / 5; and so on...
+            DEFAULT_SURF_STATS[x] += 1.0 / (Math.pow(index - x, 2) + 1);
+        }
         RobotStatus status = ew.status;
         surfingHistory.addPoint(getSurfingDataPoint(status, ew.power), new WaveNode(offsetAngle,ew.power, guessFactor, status.lateralVelocity, status.direction));
     }
@@ -875,7 +874,7 @@ public class Robot1 extends AdvancedRobot
         }
         else
         {
-            _surfStats = regenerateBins(surfWave.status, surfWave.power);
+            _surfStats = regenerateBins(surfWave.status, surfWave.fireLocation.distance(_myLocation), surfWave.power);
             goTo(getBestPoint(surfWave));
         }
     }
