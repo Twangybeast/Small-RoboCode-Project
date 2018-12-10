@@ -1,5 +1,5 @@
 # Small-RoboCode-Project
 
-A RoboCode robot algorithm along with some test robots
+A RoboCode robot algorithm along with some 3rd party test robots
 
-This robot is under the GG_EZ.java file
+The robot I made is under the GG_EZ.java file
